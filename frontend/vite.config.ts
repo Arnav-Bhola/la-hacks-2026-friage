@@ -11,9 +11,7 @@ export default defineConfig({
     'process.env.CLOUDINARY_SOURCE': '"cli"',
     'process.env.CLD_CLI': '"true"',
   },
-  server: {
-    proxy: {
-      '/api': 'http://localhost:3001',
-    },
+  resolve: {
+    dedupe: ['react', 'react-dom'],  // ← forces single React instance
   },
 })

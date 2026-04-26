@@ -1,0 +1,24 @@
+{
+  "limits": {
+    "addons_quota": [
+      {
+        "type": "ai_vision",
+        "used_by_request": 495,
+        "remaining": 31900,
+        "limit": 100000
+      }
+    ]
+  },
+  "request_id": "9bf442c2c799bedd027a1b3bfd2f98ef",
+  "data": {
+    "entity": "https://res.cloudinary.com/dp6azc0id/image/upload/v1777204960/zpj7mxc2suukdwwhzy8c.webp",
+    "analysis": {
+      "tags": [
+        {
+          "name": "trauma"
+        }
+      ],
+      "model_version": 1
+    }
+  }
+}

@@ -1,17 +1,21 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const fs = require('fs');
-const Groq = require('groq-sdk');
+import dotenv from 'dotenv';
+dotenv.config();
+import express from 'express';
+import cors from 'cors';
+import fs from 'fs';
+import Groq from 'groq-sdk';
+import { fileURLToPath } from 'url';
+import path from 'path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174'] }));
 app.use(express.json());
 
+// ── Cloudinary AI Vision Tagging ─────────────────────────────────────────────
 app.post('/api/analyze-tags', async (req, res) => {
   const { source, tag_definitions } = req.body;
   const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
-
   const credentials = Buffer.from(`${CLOUDINARY_API_KEY}:${CLOUDINARY_API_SECRET}`).toString('base64');
 
   try {
@@ -26,7 +30,6 @@ app.post('/api/analyze-tags', async (req, res) => {
         body: JSON.stringify({ source, tag_definitions }),
       }
     );
-
     const data = await response.json();
     if (!response.ok) console.error('Cloudinary error:', response.status, JSON.stringify(data));
     else fs.writeFileSync('dummy_response.json', JSON.stringify(data, null, 2));
@@ -36,110 +39,7 @@ app.post('/api/analyze-tags', async (req, res) => {
   }
 });
 
-function buildPatientDescription(tags) {
-  const tagSet = new Set(tags.map(t => t.name));
-  const parts = [];
-
-  // Wound type (most specific wins)
-  if (tagSet.has('gunshot-wound'))      parts.push('gunshot wound present');
-  else if (tagSet.has('stab-wound'))    parts.push('stab wound present');
-  else if (tagSet.has('avulsion'))      parts.push('avulsion injury');
-  else if (tagSet.has('laceration'))    parts.push('laceration present');
-  else if (tagSet.has('cut'))           parts.push('minor cut present');
-  else if (tagSet.has('abrasion'))      parts.push('abrasion present');
-  else if (tagSet.has('puncture-wound')) parts.push('puncture wound present');
-  else if (tagSet.has('burn'))          parts.push('burn injury present');
-
-  // Bleeding severity
-  if (tagSet.has('hemorrhage'))               parts.push('severe hemorrhage');
-  else if (tagSet.has('blood-pooling'))        parts.push('blood pooling at scene');
-  else if (tagSet.has('blood-soaked-bandage')) parts.push('bandage fully soaked with blood');
-  else if (tagSet.has('bleeding'))             parts.push('active bleeding');
-  else if (tagSet.has('blood'))                parts.push('blood visible');
-
-  // Consciousness
-  if (tagSet.has('unconscious') || tagSet.has('unresponsive'))
-    parts.push('patient unconscious and unresponsive');
-  else if (tagSet.has('altered-mental-status') || tagSet.has('confusion'))
-    parts.push('patient showing altered mental status');
-
-  // Skin signs
-  if (tagSet.has('cyanosis'))     parts.push('cyanosis present — possible airway compromise');
-  else if (tagSet.has('pale-skin')) parts.push('patient appears pale');
-  if (tagSet.has('diaphoresis'))  parts.push('patient diaphoretic');
-
-  // Body location
-  const locations = ['head', 'neck', 'chest', 'abdomen', 'arm', 'leg'].filter(t => tagSet.has(t));
-  if (locations.length) parts.push(`injury located on: ${locations.join(', ')}`);
-
-  // Mechanism
-  if (tagSet.has('vehicle-collision'))    parts.push('mechanism: vehicle collision');
-  else if (tagSet.has('fall-from-height')) parts.push('mechanism: fall from height');
-
-  // Already treated (de-escalates)
-  if (tagSet.has('pressure-dressing')) parts.push('pressure dressing already applied');
-  if (tagSet.has('splint'))            parts.push('splint in place');
-  if (tagSet.has('cervical-collar'))   parts.push('cervical collar applied');
-
-  return parts.length > 0
-    ? parts.join('. ') + '.'
-    : 'No specific injury indicators detected.';
-}
-
-app.post('/api/triage', async (req, res) => {
-  const { tags } = req.body;
-  const imageDescription = buildPatientDescription(tags);
-
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
-  try {
-    const response = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: `You are a medical triage AI for first responders.
-Return ONLY valid JSON. When in doubt, escalate severity.
-Use ESI levels 1-5. ESI 1-2 = trauma/emergency, 3 = urgent_care_er, 4 = urgent_care_clinic, 5 = primary_care.`,
-        },
-        {
-          role: 'user',
-          content: `Triage this patient: "${imageDescription}"
-Return exactly:
-{
-  "esi_level": <1-5>,
-  "severity": <"critical"|"high"|"moderate"|"low"|"minimal">,
-  "care_type": <"trauma"|"emergency"|"urgent_care_er"|"urgent_care_clinic"|"primary_care">,
-  "specialty": <string>,
-  "hospital_search_keyword": <string>,
-  "reasoning": <one sentence>,
-  "immediate_actions": [<string>],
-  "do_not_delay_for": [<string>]
-}`,
-        },
-      ],
-    });
-
-    const result = JSON.parse(response.choices[0].message.content);
-    res.json(result);
-  } catch (err) {
-    console.error('Groq error:', err);
-    res.status(500).json({ error: 'Triage failed' });
-  }
-});
-
-// ── Google Maps: Hospital Routing ─────────────────────────────────────────
-
-const ESI_CONFIG = {
-  1: { keyword: 'trauma center level 1', type: 'hospital', radius: 20000 },
-  2: { keyword: 'emergency room',        type: 'hospital', radius: 15000 },
-  3: { keyword: 'urgent care emergency', type: 'hospital', radius: 10000 },
-  4: { keyword: 'urgent care',           type: 'doctor',   radius: 8000  },
-  5: { keyword: 'primary care clinic',   type: 'doctor',   radius: 5000  },
-};
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function parseDurationSeconds(dur) {
   if (!dur) return null;
   const m = String(dur).match(/^(\d+)s$/);
@@ -157,13 +57,17 @@ function formatDistance(m) {
   return m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
-async function findNearbyHospitals(triageResult, lat, lng) {
-  const config = ESI_CONFIG[triageResult.esi_level] || ESI_CONFIG[3];
-  let textQuery = config.keyword;
-  if (triageResult.esi_level >= 4 && triageResult.specialty) {
-    textQuery = `${textQuery} ${triageResult.specialty}`;
-  }
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
+// ── Step 1: Get 20 nearest hospitals from Google Places ───────────────────────
+async function findNearbyHospitals(lat, lng) {
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
@@ -172,9 +76,9 @@ async function findNearbyHospitals(triageResult, lat, lng) {
       'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.types',
     },
     body: JSON.stringify({
-      textQuery,
+      textQuery: 'hospital emergency room',
       locationBias: {
-        circle: { center: { latitude: lat, longitude: lng }, radius: config.radius },
+        circle: { center: { latitude: lat, longitude: lng }, radius: 20000 },
       },
       maxResultCount: 20,
     }),
@@ -195,15 +99,7 @@ async function findNearbyHospitals(triageResult, lat, lng) {
   }));
 }
 
-function haversineMeters(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
+// ── Step 2: Get ETAs via Routes API ───────────────────────────────────────────
 async function getETAs(lat, lng, hospitals) {
   if (!hospitals.length) return [];
 
@@ -242,10 +138,10 @@ async function getETAs(lat, lng, hospitals) {
       };
     });
   } catch (err) {
-    console.warn('Routes API unavailable, falling back to straight-line estimates:', err.message);
+    console.warn('Routes API unavailable, falling back to straight-line:', err.message);
     return hospitals.map(h => {
       const meters = haversineMeters(lat, lng, h.lat, h.lng);
-      const etaSeconds = Math.round(meters / (40000 / 3600)); // assume 40 km/h
+      const etaSeconds = Math.round(meters / (40000 / 3600));
       return {
         ...h,
         eta_seconds: etaSeconds,
@@ -256,85 +152,80 @@ async function getETAs(lat, lng, hospitals) {
   }
 }
 
-async function getHospitalPhone(placeId) {
-  const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-    headers: {
-      'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
-      'X-Goog-FieldMask': 'nationalPhoneNumber,internationalPhoneNumber',
-    },
+// ── Step 3: Enrich with CDPH bed/treatment data ───────────────────────────────
+function enrichWithCDPH(googleHospitals) {
+  const cdph = JSON.parse(fs.readFileSync(path.join(__dirname, 'hospitals.json'), 'utf8'));
+
+  return googleHospitals.map(hospital => {
+    const keyword = hospital.name.toUpperCase().split(' ').slice(0, 2).join(' ');
+    const matches = cdph.filter(h => h.FACNAME?.toUpperCase().includes(keyword));
+    const treatmentTypes = [...new Set(matches.map(h => h.BED_CAPACITY_TYPE))].filter(Boolean);
+    const totalBeds = matches.reduce((sum, h) => sum + (parseInt(h.BED_CAPACITY) || 0), 0);
+    return { ...hospital, treatmentTypes, totalBeds };
   });
-  const data = await res.json();
-  if (!res.ok) return null;
-  return data.nationalPhoneNumber || data.internationalPhoneNumber || null;
 }
 
-function isAppropriateForEsi(placeName, types, esiLevel) {
-  if (esiLevel >= 4) {
-    // Exclude full hospitals — they'll have 'hospital' in their types
-    if (types.includes('hospital')) return false;
-    // Also catch by name for places that may not have typed correctly
-    const name = placeName.toLowerCase();
-    const erKeywords = ['emergency room', 'trauma center', 'level i ', 'level 1 '];
-    if (erKeywords.some(kw => name.includes(kw))) return false;
-  }
-  return true;
-}
-
-function rankHospitals(hospitals, triageResult) {
-  const esiLevel = triageResult.esi_level;
-  const specialty = (triageResult.specialty || '').toLowerCase();
-
-  // 1. Deduplicate by address (same building listed multiple times)
-  const deduped = hospitals.filter((h, i, arr) =>
-    arr.findIndex(x => x.address === h.address) === i
-  );
-
-  // 2. Hard filters — wrong care type, closed, too far for critical
-  let filtered = deduped.filter(h => {
-    if (h.open_now === false) return false;
-    if (!isAppropriateForEsi(h.name, h.types || [], esiLevel)) return false;
-    if (esiLevel <= 2 && h.eta_seconds !== null && h.eta_seconds > 1800) return false;
-    return true;
-  });
-
-  // Fallback: if all got filtered, relax only the ESI-appropriateness check
-  if (!filtered.length) {
-    filtered = deduped.filter(h => h.open_now !== false);
-  }
-  if (!filtered.length) filtered = deduped;
-
-  const maxEta = Math.max(...filtered.map(h => h.eta_seconds || 0), 1);
-
-  return filtered
-    .map(h => {
-      const specialtyMatch = specialty
-        ? h.name.toLowerCase().includes(specialty) || (h.address || '').toLowerCase().includes(specialty)
-        : false;
-      const score = Math.round(
-        40 * (1 - (h.eta_seconds ?? maxEta) / maxEta) +
-        15 + // beds default: 30 * (5/10)
-        20 * (specialtyMatch ? 1 : 0) +
-        10 * ((h.rating || 0) / 5)
-      );
-      return { ...h, score, specialty_match: specialtyMatch };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((h, i) => ({ ...h, rank: i + 1 }));
-}
-
+// ── Main endpoint ─────────────────────────────────────────────────────────────
 app.post('/api/hospitals', async (req, res) => {
-  const { triageResult, lat, lng } = req.body;
+  const { lat, lng, symptomDescription, tags } = req.body;
+
+  console.log('Received:', { lat, lng, symptomDescription, tags });
+
   try {
-    let hospitals = await findNearbyHospitals(triageResult, lat, lng);
+    let hospitals = await findNearbyHospitals(lat, lng);
     hospitals = await getETAs(lat, lng, hospitals);
-    hospitals = rankHospitals(hospitals, triageResult);
-    if (hospitals.length > 0) {
-      hospitals[0].phone = await getHospitalPhone(hospitals[0].place_id);
-    }
-    res.json({ hospitals, userLocation: { lat, lng } });
+    hospitals = enrichWithCDPH(hospitals);
+    hospitals = hospitals.map((h, i) => ({ ...h, rank: i + 1 }));
+
+    const tagList = (tags || []).map(t => t.name || t).join(', ') || 'none detected';
+    const hospitalList = hospitals.map((h, i) =>
+      `${i + 1}. ${h.name} | ETA: ${h.eta_label} | ${h.distance_label} | Beds: ${h.totalBeds || 'Unknown'} | Treatments: ${h.treatmentTypes?.join(', ') || 'Unknown'}`
+    ).join('\n');
+
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: `You are a 911 dispatch routing assistant. Recommend the best hospital based on patient symptoms and hospital capabilities. ESI levels: 1=immediate life threat, 2=high risk/severe pain, 3=urgent stable, 4=less urgent, 5=non-urgent. Respond ONLY with valid JSON.`,
+        },
+        {
+          role: 'user',
+          content: `PATIENT DESCRIPTION: ${symptomDescription || 'Not provided'}
+
+CLOUDINARY DETECTED TAGS: ${tagList}
+
+NEAREST HOSPITALS (with ETAs and bed data):
+${hospitalList}
+
+Return exactly this JSON:
+{
+  "recommended": {
+    "name": "hospital name",
+    "address": "address",
+    "eta_label": "X mins",
+    "reason": "one sentence clinical reason"
+  },
+  "alternatives": [
+    { "name": "...", "address": "...", "eta_label": "...", "reason": "..." },
+    { "name": "...", "address": "...", "eta_label": "...", "reason": "..." }
+  ],
+  "dispatchNote": "one sentence for the ambulance crew",
+  "severity": "critical|high|moderate|low",
+  "esi_level": 1|2|3|4|5
+}`,
+        },
+      ],
+    });
+
+    const recommendation = JSON.parse(response.choices[0].message.content);
+    res.json({ recommendation, hospitals });
+
   } catch (err) {
-    console.error('Hospital search error:', err.message);
+    console.error('Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
