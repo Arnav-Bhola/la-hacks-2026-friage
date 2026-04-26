@@ -75,9 +75,11 @@ export function useHospitals() {
   const setResults = (data: {
     hospitals: Hospital[];
     recommendation: Recommendation;
+    userLocation?: { lat: number; lng: number };
   }) => {
     setHospitals(data.hospitals);
     setRecommendation(data.recommendation);
+    if (data.userLocation) setUserLocation(data.userLocation);
   };
 
   // add to return:

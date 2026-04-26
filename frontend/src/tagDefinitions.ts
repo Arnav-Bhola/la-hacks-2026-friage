@@ -148,8 +148,14 @@ const TAG_DEFINITIONS = [
   { name: "rash", description: "Does the image contain rash?" },
   { name: "petechiae", description: "Does the image contain petechiae?" },
   { name: "purpura", description: "Does the image contain purpura?" },
-  { name: "capillary-refill-delayed", description: "Does the image contain capillary refill delayed?" },
-  { name: "jugular-vein-distension", description: "Does the image contain jugular vein distension?" },
+  {
+    name: "capillary-refill-delayed",
+    description: "Does the image contain capillary refill delayed?",
+  },
+  {
+    name: "jugular-vein-distension",
+    description: "Does the image contain jugular vein distension?",
+  },
   { name: "tracheal-deviation", description: "Does the image contain tracheal deviation?" },
   { name: "unequal-pupils", description: "Does the image contain unequal pupils?" },
   { name: "dilated-pupils", description: "Does the image contain dilated pupils?" },
@@ -173,8 +179,14 @@ const TAG_DEFINITIONS = [
   { name: "pelvic-instability", description: "Does the image contain pelvic instability?" },
   { name: "priapism", description: "Does the image contain priapism?" },
   { name: "genital-injury", description: "Does the image contain genital injury?" },
-  { name: "lower-extremity-swelling", description: "Does the image contain lower extremity swelling?" },
-  { name: "upper-extremity-swelling", description: "Does the image contain upper extremity swelling?" },
+  {
+    name: "lower-extremity-swelling",
+    description: "Does the image contain lower extremity swelling?",
+  },
+  {
+    name: "upper-extremity-swelling",
+    description: "Does the image contain upper extremity swelling?",
+  },
   { name: "joint-effusion", description: "Does the image contain joint effusion?" },
   { name: "hemarthrosis", description: "Does the image contain hemarthrosis?" },
   { name: "knee-dislocation", description: "Does the image contain knee dislocation?" },

@@ -3,21 +3,17 @@
     "addons_quota": [
       {
         "type": "ai_vision",
-        "used_by_request": 495,
-        "remaining": 31900,
+        "used_by_request": 631,
+        "remaining": 64192,
         "limit": 100000
       }
     ]
   },
-  "request_id": "9bf442c2c799bedd027a1b3bfd2f98ef",
+  "request_id": "64f44e6102a01daf2196b2734086bdf9",
   "data": {
-    "entity": "https://res.cloudinary.com/dp6azc0id/image/upload/v1777204960/zpj7mxc2suukdwwhzy8c.webp",
+    "entity": "https://res.cloudinary.com/dxqxep8zd/image/upload/v1777207904/as7gdfxkqyt4xx3rj2ex.webp",
     "analysis": {
-      "tags": [
-        {
-          "name": "trauma"
-        }
-      ],
+      "tags": [],
       "model_version": 1
     }
   }

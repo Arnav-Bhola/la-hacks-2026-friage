@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AdvancedImage, placeholder, lazyload } from "@cloudinary/react";
 import { fill } from "@cloudinary/url-gen/actions/resize";
 import { format, quality } from "@cloudinary/url-gen/actions/delivery";
@@ -11,20 +11,35 @@ import type { CloudinaryUploadResult } from "./cloudinary/UploadWidget";
 import "./App.css";
 import { useHospitals } from "./hospitals";
 import { HospitalCards } from "./HospitalCards";
-
 import TAG_DEFINITIONS from "./tagDefinitions";
-
 import { useAiVisionTagging } from "./cloudinary/visionTagging";
+import { useTriage } from "./triage";
+
+const ESI_META: Record<number, { label: string; color: string; bg: string }> = {
+  1: { label: "CRITICAL", color: "#fff", bg: "#b71c1c" },
+  2: { label: "EMERGENT", color: "#fff", bg: "#c62828" },
+  3: { label: "URGENT", color: "#fff", bg: "#e65100" },
+  4: { label: "LESS URGENT", color: "#222", bg: "#fdd835" },
+  5: { label: "MINIMAL", color: "#fff", bg: "#2e7d32" },
+};
 
 const hasUploadPreset = Boolean(uploadPreset);
 
 function App() {
   const symptomRef = useRef<HTMLTextAreaElement>(null);
   const [uploadedImageId, setUploadedImageId] = useState<string | null>(null);
-  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
+  const [, setUploadedUrl] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
-  const { analyze } = useAiVisionTagging();
+  const { analyze, tags } = useAiVisionTagging();
+  const { runTriage, triage, loading: triageLoading } = useTriage();
+
+  useEffect(() => {
+    if (!tags.length) return;
+    runTriage(tags.map((t) => ({ name: t.name })));
+  }, [tags]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const esiMeta = triage ? ESI_META[triage.esi_level] : null;
 
   const {
     hospitals,
@@ -47,15 +62,14 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lat: 34.0522,
-          lng: -118.2437,
+          lat: 34.07032,
+          lng: -118.44707,
           symptomDescription: symptomRef.current?.value ?? "",
           tags,
         }),
       });
       const data = await res2.json();
       setResults(data);
-
     } catch (err) {
       console.error("Failed:", err);
     } finally {
@@ -69,141 +83,170 @@ function App() {
   };
 
   const imageId = uploadedImageId || "samples/people/bicycle";
-
   const displayImage = cld
     .image(imageId)
-    .resize(fill().width(600).height(400).gravity(autoGravity()))
+    .resize(fill().width(800).height(500).gravity(autoGravity()))
     .delivery(format(auto()))
     .delivery(quality(autoQuality()));
 
-  return (
-    <div className="app">
-      <main className="main-content">
-        <h1>Triage</h1>
+  const esiBadgeBg =
+    (recommendation?.esi_level ?? 5) <= 2
+      ? "#dc2626"
+      : (recommendation?.esi_level ?? 5) === 3
+        ? "#d97706"
+        : "#16a34a";
 
+  return (
+    <div className='app'>
+      {/* ── Header ── */}
+      <header className='app-header'>
+        <div className='header-inner'>
+          <span className='header-cross'>✚</span>
+          <div>
+            <span className='header-title'>Friage</span>
+            <span className='header-sub'>AI Emergency Triage</span>
+          </div>
+        </div>
+      </header>
+
+      <main className='main-content'>
+        {/* ── Intake Card ── */}
         {hasUploadPreset && (
-          <div className="upload-section">
-            <h2>Patient Description</h2>
-            <textarea
-              ref={symptomRef}
-              placeholder="Describe the patient's condition (e.g. unconscious male, fell from ladder, head bleeding)"
-              rows={3}
-              style={{
-                width: "100%",
-                padding: "10px",
-                borderRadius: "8px",
-                border: "1px solid #ccc",
-                fontSize: "14px",
-                marginBottom: "12px",
-                boxSizing: "border-box",
-                resize: "vertical",
-              }}
-            />
-            <h2>Upload Patient Photo</h2>
-            <UploadWidget
-              onUploadSuccess={handleUploadSuccess}
-              onUploadError={handleUploadError}
-              buttonText="Upload Image"
-            />
-            {analyzing && (
-              <p style={{ color: "#1a73e8", marginTop: "12px" }}>
-                Analyzing image and finding hospitals...
-              </p>
-            )}
+          <div className='card'>
+            <div className='card-body'>
+              <label className='field-label'>Describe the patient's condition</label>
+              <textarea
+                ref={symptomRef}
+                className='symptom-input'
+                placeholder='e.g. unconscious male, fell from ladder, head bleeding...'
+                rows={3}
+              />
+              <div className='upload-row'>
+                <UploadWidget
+                  onUploadSuccess={handleUploadSuccess}
+                  onUploadError={handleUploadError}
+                  buttonText='Upload Photo'
+                />
+                {analyzing && <span className='pill pill-blue'>Analyzing image…</span>}
+              </div>
+
+              {uploadedImageId && (
+                <div className='preview-wrap'>
+                  <AdvancedImage
+                    cldImg={displayImage}
+                    plugins={[placeholder({ mode: "blur" }), lazyload()]}
+                    alt='Uploaded patient image'
+                    className='preview-img'
+                  />
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="image-section">
-          <h2>Display Image</h2>
-          <AdvancedImage
-            cldImg={displayImage}
-            plugins={[placeholder({ mode: "blur" }), lazyload()]}
-            alt={uploadedImageId ? "Your uploaded image" : "Sample image"}
-            className="display-image"
-          />
-          {uploadedImageId && (
-            <p className="image-info">Public ID: {uploadedImageId}</p>
-          )}
-          {uploadedUrl && (
-            <p className="image-info">
-              URL:{" "}
-              <a href={uploadedUrl} target="_blank" rel="noopener noreferrer">
-                {uploadedUrl}
-              </a>
-            </p>
-          )}
-        </div>
-
-        {recommendation && (
-          <div
-            style={{
-              margin: "16px 0",
-              padding: "16px",
-              borderRadius: "12px",
-              background: "#f0f7ff",
-              border: "1px solid #1a73e8",
-            }}
-          >
-            <h3 style={{ margin: "0 0 8px", color: "#1a73e8" }}>
-              Recommendation — {recommendation.severity.toUpperCase()}
-              <span
-                style={{
-                  marginLeft: "10px",
-                  background:
-                    recommendation.esi_level <= 2
-                      ? "#dc2626"
-                      : recommendation.esi_level === 3
-                        ? "#f59e0b"
-                        : "#16a34a",
-                  color: "white",
-                  borderRadius: "6px",
-                  padding: "2px 10px",
-                  fontSize: "14px",
-                  fontWeight: "bold",
-                }}
-              >
-                ESI {recommendation.esi_level}
-              </span>
-            </h3>
-            <p style={{ margin: "0 0 4px", fontWeight: 600, color: "#333" }}>
-              → {recommendation.recommended.name}
-            </p>
-            <p style={{ margin: "0 0 4px", color: "#555", fontSize: "14px" }}>
-              {recommendation.recommended.reason}
-            </p>
-            <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#333" }}>
-              <strong>Dispatch note:</strong> {recommendation.dispatchNote}
-            </p>
-            {(recommendation.alternatives?.length ?? 0) > 0 && (
-              <div style={{ marginTop: "12px" }}>
-                <p
-                  style={{
-                    margin: "0 0 4px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                    color: "#555",
-                  }}
-                >
-                  Alternatives:
-                </p>
-                {recommendation.alternatives.map((alt, i) => (
-                  <p
-                    key={i}
-                    style={{ margin: "2px 0", fontSize: "13px", color: "#666" }}
-                  >
-                    {i + 2}. {alt.name} — {alt.reason}
-                  </p>
-                ))}
+        {/* ── ESI Triage Card ── */}
+        {(triageLoading || triage) && (
+          <div className='card'>
+            {triageLoading && (
+              <div className='card-body'>
+                <span className='pill pill-blue'>Running triage…</span>
               </div>
             )}
+            {triage && esiMeta && (
+              <>
+                <div
+                  className='esi-banner'
+                  style={{ background: esiMeta.bg, color: esiMeta.color }}
+                >
+                  <span className='esi-level'>ESI {triage.esi_level}</span>
+                  <span className='esi-label'>{esiMeta.label}</span>
+                  <span className='esi-care'>
+                    {triage.care_type.replace(/_/g, " ")} · {triage.specialty}
+                  </span>
+                </div>
+                <div className='card-body esi-body'>
+                  <p className='esi-reasoning'>
+                    <strong>Reasoning:</strong> {triage.reasoning}
+                  </p>
+                  {triage.immediate_actions.length > 0 && (
+                    <div>
+                      <p className='list-label'>Immediate Actions</p>
+                      <ul className='action-list'>
+                        {triage.immediate_actions.map((a, i) => (
+                          <li key={i}>{a}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {(triage.do_not_delay_for?.length ?? 0) > 0 && (
+                    <div>
+                      <p className='list-label list-label--red'>Do NOT delay for</p>
+                      <ul className='action-list action-list--red'>
+                        {triage.do_not_delay_for.map((a, i) => (
+                          <li key={i}>{a}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
+        {/* ── Dispatch Recommendation ── */}
+        {recommendation && (
+          <div className='card card--accent'>
+            <div className='card-body'>
+              <div className='rec-header'>
+                <span className='rec-title'>Dispatch Recommendation</span>
+                <span
+                  className='esi-badge'
+                  style={{ background: esiBadgeBg }}
+                >
+                  ESI {recommendation.esi_level} · {recommendation.severity.toUpperCase()}
+                </span>
+              </div>
+              <div className='rec-top'>
+                <span className='rec-name'>{recommendation.recommended.name}</span>
+                {recommendation.recommended.eta_label && (
+                  <span className='rec-eta'>{recommendation.recommended.eta_label}</span>
+                )}
+              </div>
+              <p className='rec-reason'>{recommendation.recommended.reason}</p>
+              <div className='dispatch-note'>
+                <strong>Dispatch:</strong> {recommendation.dispatchNote}
+              </div>
+              {(recommendation.alternatives?.length ?? 0) > 0 && (
+                <div className='alt-section'>
+                  <p
+                    className='list-label'
+                    style={{ marginTop: 12 }}
+                  >
+                    Alternatives
+                  </p>
+                  {recommendation.alternatives.map((alt, i) => (
+                    <div
+                      key={i}
+                      className='alt-row'
+                    >
+                      <span className='alt-num'>{i + 2}</span>
+                      <span className='alt-name'>{alt.name}</span>
+                      <span className='alt-reason'>— {alt.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Nearby Hospitals ── */}
         {(hospitalsLoading || hospitals.length > 0 || hospitalsError) && (
-          <div className="hospitals-section">
-            <h2>Nearby Facilities</h2>
-            {hospitalsLoading && <p>Finding hospitals near you...</p>}
-            {hospitalsError && <p style={{ color: "red" }}>{hospitalsError}</p>}
+          <div>
+            <h2 className='section-title'>Nearby Facilities</h2>
+            {hospitalsLoading && <p className='status-text'>Finding hospitals near you…</p>}
+            {hospitalsError && <p className='error-text'>{hospitalsError}</p>}
             {hospitals.length > 0 && (
               <HospitalCards
                 hospitals={hospitals}
@@ -218,3 +261,4 @@ function App() {
 }
 
 export default App;
+

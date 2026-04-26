@@ -222,7 +222,7 @@ Return exactly this JSON:
     });
 
     const recommendation = JSON.parse(response.choices[0].message.content);
-    res.json({ recommendation, hospitals });
+    res.json({ recommendation, hospitals, userLocation: { lat, lng } });
 
   } catch (err) {
     console.error('Error:', err.message);
