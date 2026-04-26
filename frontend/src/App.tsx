@@ -144,7 +144,7 @@ function App() {
           </div>
         )}
 
-        {/* ── ESI Triage Card ── */}
+        {/* ── ESI Triage Card ──
         {(triageLoading || triage) && (
           <div className='card'>
             {triageLoading && (
@@ -189,10 +189,10 @@ function App() {
                     </div>
                   )}
                 </div>
-              </>
+              </> 
             )}
           </div>
-        )}
+        )} */}
 
         {/* ── Dispatch Recommendation ── */}
         {recommendation && (

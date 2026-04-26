@@ -72,6 +72,13 @@ export function HospitalCards({ hospitals, userLocation }: Props) {
               </div>
             )}
 
+            {/* Beds */}
+            {h.totalBeds != null && h.totalBeds > 0 && (
+              <div style={{ fontSize: '13px', color: '#555', fontWeight: 500 }}>
+                🛏 {h.totalBeds} beds
+              </div>
+            )}
+
             {/* Address */}
             <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>{h.address}</div>
 
