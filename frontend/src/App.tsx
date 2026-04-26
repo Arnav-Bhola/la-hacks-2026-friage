@@ -14,6 +14,7 @@ import { HospitalCards } from "./HospitalCards";
 import TAG_DEFINITIONS from "./tagDefinitions";
 import { useAiVisionTagging } from "./cloudinary/visionTagging";
 import { useTriage } from "./triage";
+import { ReportQRModal } from "./ReportQR";
 
 const ESI_META: Record<number, { label: string; color: string; bg: string }> = {
   1: { label: "CRITICAL", color: "#fff", bg: "#b71c1c" },
@@ -30,6 +31,9 @@ function App() {
   const [uploadedImageId, setUploadedImageId] = useState<string | null>(null);
   const [, setUploadedUrl] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [reportUrl, setReportUrl] = useState<string | null>(null);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [showQR, setShowQR] = useState(false);
 
   const { analyze, tags } = useAiVisionTagging();
   const { runTriage, triage, loading: triageLoading } = useTriage();
@@ -74,6 +78,33 @@ function App() {
       console.error("Failed:", err);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    setGeneratingReport(true);
+    try {
+      const res = await fetch("/api/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          triage,
+          tags,
+          hospitals,
+          recommendation,
+          userDescription: symptomRef.current?.value ?? "",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed");
+      const { url } = json;
+      setReportUrl(url);
+      setShowQR(true);
+    } catch (err) {
+      console.error(err);
+      alert(`Report failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGeneratingReport(false);
     }
   };
 
@@ -151,7 +182,7 @@ function App() {
               <div className='card-body'>
                 <span className='pill pill-blue'>Running triage…</span>
               </div>
-            )}
+            )}    
             {triage && esiMeta && (
               <>
                 <div
@@ -239,6 +270,30 @@ function App() {
               )}
             </div>
           </div>
+        )}
+
+        {/* ── QR Report ── */}
+        {recommendation && (
+          <button
+            onClick={handleGenerateReport}
+            disabled={generatingReport}
+            style={{
+              width: "100%",
+              padding: "14px",
+              background: generatingReport ? "#94a3b8" : "#0f172a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 12,
+              fontSize: 15,
+              fontWeight: 700,
+              cursor: generatingReport ? "not-allowed" : "pointer",
+            }}
+          >
+            {generatingReport ? "⏳ Generating PDF…" : "📱 Generate QR Report for Nurse"}
+          </button>
+        )}
+        {showQR && reportUrl && (
+          <ReportQRModal url={reportUrl} onClose={() => setShowQR(false)} />
         )}
 
         {/* ── Nearby Hospitals ── */}
