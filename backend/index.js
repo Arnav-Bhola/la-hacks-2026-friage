@@ -130,5 +130,214 @@ Return exactly:
   }
 });
 
+// ── Google Maps: Hospital Routing ─────────────────────────────────────────
+
+const ESI_CONFIG = {
+  1: { keyword: 'trauma center level 1', type: 'hospital', radius: 20000 },
+  2: { keyword: 'emergency room',        type: 'hospital', radius: 15000 },
+  3: { keyword: 'urgent care emergency', type: 'hospital', radius: 10000 },
+  4: { keyword: 'urgent care',           type: 'doctor',   radius: 8000  },
+  5: { keyword: 'primary care clinic',   type: 'doctor',   radius: 5000  },
+};
+
+function parseDurationSeconds(dur) {
+  if (!dur) return null;
+  const m = String(dur).match(/^(\d+)s$/);
+  return m ? parseInt(m[1]) : null;
+}
+
+function formatDuration(s) {
+  const mins = Math.round(s / 60);
+  if (mins < 60) return `${mins} min${mins !== 1 ? 's' : ''}`;
+  const h = Math.floor(mins / 60), r = mins % 60;
+  return r > 0 ? `${h}h ${r}m` : `${h}h`;
+}
+
+function formatDistance(m) {
+  return m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+async function findNearbyHospitals(triageResult, lat, lng) {
+  const config = ESI_CONFIG[triageResult.esi_level] || ESI_CONFIG[3];
+  let textQuery = config.keyword;
+  if (triageResult.esi_level >= 4 && triageResult.specialty) {
+    textQuery = `${textQuery} ${triageResult.specialty}`;
+  }
+
+  const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.regularOpeningHours,places.businessStatus,places.types',
+    },
+    body: JSON.stringify({
+      textQuery,
+      locationBias: {
+        circle: { center: { latitude: lat, longitude: lng }, radius: config.radius },
+      },
+      maxResultCount: 20,
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Places API: ${data.error?.message || res.status}`);
+
+  return (data.places || []).map(p => ({
+    place_id: p.id,
+    name: p.displayName?.text || '',
+    address: p.formattedAddress || '',
+    rating: p.rating ?? 0,
+    open_now: p.regularOpeningHours?.openNow ?? null,
+    lat: p.location?.latitude,
+    lng: p.location?.longitude,
+    types: p.types || [],
+  }));
+}
+
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function getETAs(lat, lng, hospitals) {
+  if (!hospitals.length) return [];
+
+  try {
+    const res = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+        'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,condition',
+      },
+      body: JSON.stringify({
+        origins: [{ waypoint: { location: { latLng: { latitude: lat, longitude: lng } } } }],
+        destinations: hospitals.map(h => ({
+          waypoint: { location: { latLng: { latitude: h.lat, longitude: h.lng } } },
+        })),
+        travelMode: 'DRIVE',
+        routingPreference: 'TRAFFIC_AWARE',
+      }),
+    });
+
+    const text = await res.text();
+    if (!text) throw new Error('empty response');
+    const data = JSON.parse(text);
+    if (!res.ok) throw new Error(data.error?.message || res.status);
+
+    const elements = Array.isArray(data) ? data : [];
+    return hospitals.map((h, i) => {
+      const el = elements.find(e => e.destinationIndex === i && e.condition === 'ROUTE_EXISTS');
+      const etaSeconds = el ? parseDurationSeconds(el.duration) : null;
+      return {
+        ...h,
+        eta_seconds: etaSeconds,
+        eta_label: etaSeconds !== null ? formatDuration(etaSeconds) : 'Unknown',
+        distance_label: el?.distanceMeters != null ? formatDistance(el.distanceMeters) : 'Unknown',
+      };
+    });
+  } catch (err) {
+    console.warn('Routes API unavailable, falling back to straight-line estimates:', err.message);
+    return hospitals.map(h => {
+      const meters = haversineMeters(lat, lng, h.lat, h.lng);
+      const etaSeconds = Math.round(meters / (40000 / 3600)); // assume 40 km/h
+      return {
+        ...h,
+        eta_seconds: etaSeconds,
+        eta_label: formatDuration(etaSeconds) + ' (est.)',
+        distance_label: formatDistance(Math.round(meters)) + ' (est.)',
+      };
+    });
+  }
+}
+
+async function getHospitalPhone(placeId) {
+  const res = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
+    headers: {
+      'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+      'X-Goog-FieldMask': 'nationalPhoneNumber,internationalPhoneNumber',
+    },
+  });
+  const data = await res.json();
+  if (!res.ok) return null;
+  return data.nationalPhoneNumber || data.internationalPhoneNumber || null;
+}
+
+function isAppropriateForEsi(placeName, types, esiLevel) {
+  if (esiLevel >= 4) {
+    // Exclude full hospitals — they'll have 'hospital' in their types
+    if (types.includes('hospital')) return false;
+    // Also catch by name for places that may not have typed correctly
+    const name = placeName.toLowerCase();
+    const erKeywords = ['emergency room', 'trauma center', 'level i ', 'level 1 '];
+    if (erKeywords.some(kw => name.includes(kw))) return false;
+  }
+  return true;
+}
+
+function rankHospitals(hospitals, triageResult) {
+  const esiLevel = triageResult.esi_level;
+  const specialty = (triageResult.specialty || '').toLowerCase();
+
+  // 1. Deduplicate by address (same building listed multiple times)
+  const deduped = hospitals.filter((h, i, arr) =>
+    arr.findIndex(x => x.address === h.address) === i
+  );
+
+  // 2. Hard filters — wrong care type, closed, too far for critical
+  let filtered = deduped.filter(h => {
+    if (h.open_now === false) return false;
+    if (!isAppropriateForEsi(h.name, h.types || [], esiLevel)) return false;
+    if (esiLevel <= 2 && h.eta_seconds !== null && h.eta_seconds > 1800) return false;
+    return true;
+  });
+
+  // Fallback: if all got filtered, relax only the ESI-appropriateness check
+  if (!filtered.length) {
+    filtered = deduped.filter(h => h.open_now !== false);
+  }
+  if (!filtered.length) filtered = deduped;
+
+  const maxEta = Math.max(...filtered.map(h => h.eta_seconds || 0), 1);
+
+  return filtered
+    .map(h => {
+      const specialtyMatch = specialty
+        ? h.name.toLowerCase().includes(specialty) || (h.address || '').toLowerCase().includes(specialty)
+        : false;
+      const score = Math.round(
+        40 * (1 - (h.eta_seconds ?? maxEta) / maxEta) +
+        15 + // beds default: 30 * (5/10)
+        20 * (specialtyMatch ? 1 : 0) +
+        10 * ((h.rating || 0) / 5)
+      );
+      return { ...h, score, specialty_match: specialtyMatch };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((h, i) => ({ ...h, rank: i + 1 }));
+}
+
+app.post('/api/hospitals', async (req, res) => {
+  const { triageResult, lat, lng } = req.body;
+  try {
+    let hospitals = await findNearbyHospitals(triageResult, lat, lng);
+    hospitals = await getETAs(lat, lng, hospitals);
+    hospitals = rankHospitals(hospitals, triageResult);
+    if (hospitals.length > 0) {
+      hospitals[0].phone = await getHospitalPhone(hospitals[0].place_id);
+    }
+    res.json({ hospitals, userLocation: { lat, lng } });
+  } catch (err) {
+    console.error('Hospital search error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
