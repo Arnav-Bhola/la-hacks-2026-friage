@@ -18,11 +18,21 @@ export interface Hospital {
 }
 
 export interface Recommendation {
-  recommended: { name: string; address: string; eta_label: string; reason: string };
-  alternatives: { name: string; address: string; eta_label: string; reason: string }[];
+  recommended: {
+    name: string;
+    address: string;
+    eta_label: string;
+    reason: string;
+  };
+  alternatives: {
+    name: string;
+    address: string;
+    eta_label: string;
+    reason: string;
+  }[];
   dispatchNote: string;
   severity: string;
-  esi_level: number;  // ← add this
+  esi_level: number; // ← add this
 }
 
 export function useHospitals() {
@@ -56,10 +66,10 @@ export function useHospitals() {
 
       // Call backend
       const res = await fetch("http://localhost:3001/api/hospitals", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ lat, lng }),  // minimal call, App.tsx handles the real call
-});
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat, lng }), // minimal call, App.tsx handles the real call
+      });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
 
@@ -92,5 +102,4 @@ export function useHospitals() {
     error,
     setResults,
   };
-
 }
